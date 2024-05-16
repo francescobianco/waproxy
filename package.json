@@ -17,7 +17,7 @@
   },
   "homepage": "https://github.com/francescobianco/wbmserver#readme",
   "dependencies": {
-    "fastify": "^4.27.0",
+    "express": "^4.19.2",
     "wbm": "github:francescobianco/wbm"
   }
 }
