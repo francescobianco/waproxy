@@ -1,0 +1,23 @@
+{
+  "name": "wbmserver",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/francescobianco/wbmserver.git"
+  },
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/francescobianco/wbmserver/issues"
+  },
+  "homepage": "https://github.com/francescobianco/wbmserver#readme",
+  "dependencies": {
+    "fastify": "^4.27.0",
+    "wbm": "github:francescobianco/wbm"
+  }
+}
