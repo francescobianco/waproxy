@@ -25,6 +25,6 @@ COPY index.js /app/index.js
 
 WORKDIR /app
 
-VOLUME /var/wbm/data
+VOLUME /var/waproxy/data
 
 CMD ["node", "index.js"]
