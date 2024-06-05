@@ -56,8 +56,6 @@ app.post('/send', async (req, res) => {
 })
 
 client.on('qr', (qr) => {
-    // Generate and scan this code with your phone
-    //console.log('QR RECEIVED', qr);
     qrcode.generate(qr, { small: true });
 });
 
