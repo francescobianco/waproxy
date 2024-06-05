@@ -1,5 +1,5 @@
 {
-  "name": "wbmserver",
+  "name": "waproxy",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -8,16 +8,17 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/francescobianco/wbmserver.git"
+    "url": "git+https://github.com/francescobianco/waproxy.git"
   },
   "author": "",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/francescobianco/wbmserver/issues"
+    "url": "https://github.com/francescobianco/waproxy/issues"
   },
-  "homepage": "https://github.com/francescobianco/wbmserver#readme",
+  "homepage": "https://github.com/francescobianco/waproxy#readme",
   "dependencies": {
     "express": "^4.19.2",
-    "wbm": "github:francescobianco/wbm"
+    "whatsapp-web.js": "^1.23.0",
+    "qrcode-terminal": "^0.12.0"
   }
 }

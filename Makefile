@@ -1,7 +1,9 @@
 
-start:
-	@docker build -t wbmserver .
-	@docker run -it --init -v $${PWD}/tmp:/var/wbm/data -p 3000:3000 wbmserver
+build:
+	@docker build -t waproxy .
+
+start: build
+	@docker run -it --init -v $${PWD}/tmp:/var/waproxy/data -p 3000:3000 waproxy
 
 test-send:
-	@curl -X POST -d "to=WhatsApp Test" -d message=ciao http://localhost:3000/send
+	@curl localhost:3000/send?to=393200466987 -d "c  iaocomestai"

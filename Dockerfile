@@ -1,6 +1,6 @@
 FROM debian:12-slim
 
-ENV WBM_DATA_DIR /var/wbm/data
+ENV WAPROXY_DATA_DIR /var/waproxy/data
 ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get update
