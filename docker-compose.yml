@@ -1,5 +1,0 @@
-
-services:
-  waproxy:
-    build: .
-

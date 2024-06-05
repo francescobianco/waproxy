@@ -25,6 +25,11 @@ const client = new Client({
 });
 const express = require('express')
 const app = express()
+const auth = require('express-basic-auth')
+
+app.use(auth({
+    users: { 'wa': process.env.WAPROXY_PASSWORD || 'wa' },
+}))
 
 //app.use(express.urlencoded({ extended: true }));
 app.use(express.raw({ type: "*/*" }))
