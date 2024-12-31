@@ -5,7 +5,7 @@
 deploy: push
 	@git remote remove piku || true
 	@git remote add piku piku@piku.lab.tp.it:waproxy
-	@date > RELEASE.txt
+	@date > tests/RELEASE.txt
 	@git add .
 	@git commit -am "Deploy"
 	@git push

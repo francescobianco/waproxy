@@ -27,7 +27,7 @@ const express = require('express')
 const app = express()
 const auth = require('express-basic-auth')
 const WAPROXY_PASSWORD = process.env.WAPROXY_PASSWORD || 'wa'
-//const behaviours = require('./behaviours');
+const behaviours = require('./behaviours');
 
 let isReady = false;
 
@@ -50,16 +50,8 @@ function bootstrap() {
     app.post('/send', async (req, res) => {
         const chat = req.query.to;
         const message = String(req.body);
-
-
-
-        console.log("params", req.params)   ;
-        console.log("body", req.body)   ;
-        console.log("message", message)   ;
-
         try {
             const numberId = await client.getNumberId(chat);
-            console.log("CONTACT ID", numberId._serialized)
             const sendMessage = await client.sendMessage(numberId._serialized, message);
             console.log("SENT", sendMessage)
         } catch (error) {
@@ -69,7 +61,7 @@ function bootstrap() {
     })
 
     client.on('message', msg => {
-        if (msg.body == '!ping') {
+        if (msg.body === '/ping') {
             msg.reply('pong');
         }
     });
@@ -82,9 +74,9 @@ client.on('qr', (qr) => {
 
 client.on('ready', () => {
     bootstrap()
-    console.log('Client is ready!');
     //behaviours(client, app);
     isReady = true;
+    console.log('WAProxy is ready!');
 });
 
 app.listen(3025)
