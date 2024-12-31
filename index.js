@@ -29,50 +29,64 @@ const auth = require('express-basic-auth')
 const WAPROXY_PASSWORD = process.env.WAPROXY_PASSWORD || 'wa'
 //const behaviours = require('./behaviours');
 
-app.use(auth({
-    users: { 'wa': WAPROXY_PASSWORD },
-}))
+let isReady = false;
 
 //app.use(express.urlencoded({ extended: true }));
 app.use(express.raw({ type: "*/*" }))
 
-app.post('/send', async (req, res) => {
-    const chat = req.query.to;
-    const message = String(req.body);
-
-
-
-    console.log("params", req.params)   ;
-    console.log("body", req.body)   ;
-    console.log("message", message)   ;
-
-    try {
-        const numberId = await client.getNumberId(chat);
-        console.log("CONTACT ID", numberId._serialized)
-        const sendMessage = await client.sendMessage(numberId._serialized, message);
-        console.log("SENT", sendMessage)
-    } catch (error) {
-        console.log("ERROR", error)
+app.use((req, res, next) => {
+    if (isReady) {
+        next();
+    } else {
+        res.status(503).send('<h1>WAProxy</h1><p>Please consult the logs to proceed with the configuration.</p>');
     }
-    res.send('Ok!'+"\n")
-})
+});
+
+function bootstrap() {
+    app.use(auth({
+        users: { 'wa': WAPROXY_PASSWORD },
+    }))
+
+    app.post('/send', async (req, res) => {
+        const chat = req.query.to;
+        const message = String(req.body);
+
+
+
+        console.log("params", req.params)   ;
+        console.log("body", req.body)   ;
+        console.log("message", message)   ;
+
+        try {
+            const numberId = await client.getNumberId(chat);
+            console.log("CONTACT ID", numberId._serialized)
+            const sendMessage = await client.sendMessage(numberId._serialized, message);
+            console.log("SENT", sendMessage)
+        } catch (error) {
+            console.log("ERROR", error)
+        }
+        res.send('Ok!'+"\n")
+    })
+
+    client.on('message', msg => {
+        if (msg.body == '!ping') {
+            msg.reply('pong');
+        }
+    });
+}
 
 client.on('qr', (qr) => {
     qrcode.generate(qr, { small: true });
     console.log('WAPROXY_PASSWORD:', WAPROXY_PASSWORD);
 });
 
-client.on('message', msg => {
-    if (msg.body == '!ping') {
-        msg.reply('pong');
-    }
+client.on('ready', () => {
+    bootstrap()
+    console.log('Client is ready!');
+    //behaviours(client, app);
+    isReady = true;
 });
 
-client.on('ready', () => {
-    console.log('Client is ready!');
-    app.listen(3025)
-    //behaviours(client, app);
-});
+app.listen(3025)
 
 client.initialize();
-

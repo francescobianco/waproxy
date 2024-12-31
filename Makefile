@@ -1,6 +1,5 @@
 
 .env:
-	@rm -f .env || true
 	@echo "WAPROXY_PASSWORD=$(shell openssl rand -hex 32)" > .env
 
 deploy: push
