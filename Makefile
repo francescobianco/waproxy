@@ -11,6 +11,9 @@ deploy: push
 	@git push
 	@git push piku main
 
+piku-logs:
+	@ssh piku@piku.lab.tp.it logs waproxy
+
 push:
 	@git add .
 	@git commit -am "update" || true

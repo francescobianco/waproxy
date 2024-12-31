@@ -26,9 +26,10 @@ const client = new Client({
 const express = require('express')
 const app = express()
 const auth = require('express-basic-auth')
+const WAPROXY_PASSWORD = process.env.WAPROXY_PASSWORD || 'wa'
 
 app.use(auth({
-    users: { 'wa': process.env.WAPROXY_PASSWORD || 'wa' },
+    users: { 'wa': WAPROXY_PASSWORD },
 }))
 
 //app.use(express.urlencoded({ extended: true }));
@@ -57,6 +58,7 @@ app.post('/send', async (req, res) => {
 
 client.on('qr', (qr) => {
     qrcode.generate(qr, { small: true });
+    console.log('WAPROXY_PASSWORD:', WAPROXY_PASSWORD);
 });
 
 client.on('message', msg => {

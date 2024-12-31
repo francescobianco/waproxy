@@ -3,3 +3,5 @@ services:
     build: .
     env_file:
       - .env
+    ports:
+      - "3025:3025"
