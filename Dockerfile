@@ -1,8 +1,8 @@
 FROM debian:12-slim
 
-ENV WAPROXY_DATA_DIR /var/waproxy/data
-ENV WAPROXY_PASSWORD wa
-ENV DEBIAN_FRONTEND noninteractive
+ENV WAPROXY_DATA_DIR=/var/waproxy/data
+ENV WAPROXY_PASSWORD=wa
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update
 RUN apt-get install -y wget
