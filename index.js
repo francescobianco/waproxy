@@ -27,6 +27,7 @@ const express = require('express')
 const app = express()
 const auth = require('express-basic-auth')
 const WAPROXY_PASSWORD = process.env.WAPROXY_PASSWORD || 'wa'
+const behaviours = require('./behaviours');
 
 app.use(auth({
     users: { 'wa': WAPROXY_PASSWORD },
@@ -70,8 +71,8 @@ client.on('message', msg => {
 client.on('ready', () => {
     console.log('Client is ready!');
     app.listen(3025)
+    behaviours(client, app);
 });
 
 client.initialize();
-
 
