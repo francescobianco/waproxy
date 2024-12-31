@@ -1,0 +1,5 @@
+services:
+  waproxy:
+    build: .
+    env_file:
+      - .env

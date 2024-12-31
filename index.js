@@ -67,7 +67,7 @@ client.on('message', msg => {
 
 client.on('ready', () => {
     console.log('Client is ready!');
-    app.listen(3000)
+    app.listen(3025)
 });
 
 client.initialize();

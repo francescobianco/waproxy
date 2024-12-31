@@ -1,4 +1,16 @@
 
+.env:
+	@echo "WAPROXY_PASSWORD=$(shell openssl rand -base64 32)" > .env
+
+deploy: push
+	@git remote remove piku || true
+	@git remote add piku piku@piku.lab.tp.it:waproxy
+	@date > RELEASE.txt
+	@git add .
+	@git commit -am "Deploy"
+	@git push
+	@git push piku main
+
 push:
 	@git add .
 	@git commit -am "update" || true
@@ -9,7 +21,7 @@ build:
 
 start: build
 	@echo "Starting waproxy..."
-	@docker run -it --init --rm -e WAPROXY_PASSWORD=Secret1234! -v $${PWD}/tmp:/var/waproxy/data -p 3000:3000 yafb/waproxy
+	@docker run -it --init --rm -e WAPROXY_PASSWORD=Secret1234! -v $${PWD}/tmp:/var/waproxy/data -p 3025:3025 yafb/waproxy
 
 test-send:
 	@curl -v -u wa:Secret1234! localhost:3000/send?to=393200466987 -d "c  iaocome asdasd stai"
