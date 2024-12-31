@@ -7,3 +7,4 @@ services:
       - "3025:3025"
     volumes:
       - /data:/var/waproxy/data
+    restart: "unless-stopped"
