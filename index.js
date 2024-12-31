@@ -77,6 +77,7 @@ client.on('ready', () => {
     //behaviours(client, app);
     isReady = true;
     console.log('WAProxy is ready!');
+    console.log('WAPROXY_PASSWORD:', WAPROXY_PASSWORD);
 });
 
 app.listen(3025)
