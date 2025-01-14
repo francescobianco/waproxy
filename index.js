@@ -1,7 +1,7 @@
 const wwebVersion = '2.2412.54';
 const qrcode = require("qrcode-terminal");
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const client = new Client({
+const chat = new Client({
     puppeteer: {
         headless: true,
         args: [
@@ -24,17 +24,17 @@ const client = new Client({
     })
 });
 const express = require('express')
-const app = express()
+const web = express()
 const auth = require('express-basic-auth')
 const WAPROXY_PASSWORD = process.env.WAPROXY_PASSWORD || 'wa'
 const behaviours = require('./behaviours');
 
 let isReady = false;
 
-//app.use(express.urlencoded({ extended: true }));
-app.use(express.raw({ type: "*/*" }))
+//web.use(express.urlencoded({ extended: true }));
+web.use(express.raw({ type: "*/*" }))
 
-app.use((req, res, next) => {
+web.use((req, res, next) => {
     if (isReady) {
         next();
     } else {
@@ -42,44 +42,37 @@ app.use((req, res, next) => {
     }
 });
 
-function bootstrap() {
-    app.use(auth({
+function bootstrap(chat, web) {
+    web.use(auth({
         users: { 'wa': WAPROXY_PASSWORD },
     }))
 
-    app.post('/send', async (req, res) => {
+    web.post('/send', async (req, res) => {
         const chat = req.query.to;
         const message = String(req.body);
         try {
-            const numberId = await client.getNumberId(chat);
-            const sendMessage = await client.sendMessage(numberId._serialized, message);
+            const numberId = await chat.getNumberId(chat);
+            const sendMessage = await chat.sendMessage(numberId._serialized, message);
             console.log("SENT", sendMessage)
         } catch (error) {
             console.log("ERROR", error)
         }
         res.send('Ok!'+"\n")
     })
-
-    client.on('message', msg => {
-        if (msg.body === '/ping') {
-            msg.reply('pong');
-        }
-    });
 }
 
-client.on('qr', (qr) => {
+chat.on('qr', (qr) => {
     qrcode.generate(qr, { small: true });
-    console.log('WAPROXY_PASSWORD:', WAPROXY_PASSWORD);
+    console.log('WAPROXY_PASSWORD:', WAPROXY_PASSWORD)
 });
 
-client.on('ready', () => {
-    bootstrap()
-    //behaviours(client, app);
-    isReady = true;
-    console.log('WAProxy is ready!');
-    console.log('WAPROXY_PASSWORD:', WAPROXY_PASSWORD);
+chat.on('ready', () => {
+    bootstrap(chat, web)
+    behaviours(chat, web)
+    isReady = true
+    console.log('WAProxy is ready!')
 });
 
-app.listen(3025)
+web.listen(3025)
 
-client.initialize();
+chat.initialize();

@@ -1,4 +1,4 @@
 
-module.exports = function(client, app) {
+module.exports = function(chat, web) {
 
 }
