@@ -43,7 +43,7 @@ web.use((req, res, next) => {
     }
 });
 
-function bootstrap(chat, web) {
+function bootstrap(chat, web, cron) {
     web.use(auth({
         users: { 'wa': WAPROXY_PASSWORD },
     }))
@@ -55,8 +55,8 @@ chat.on('qr', (qr) => {
 });
 
 chat.on('ready', () => {
-    bootstrap(chat, web)
-    behaviours(chat, web)
+    bootstrap(chat, web, cron)
+    behaviours(chat, web, cron)
     isReady = true
     console.log('WAProxy is ready!')
 });
