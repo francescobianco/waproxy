@@ -1,5 +1,6 @@
 const wwebVersion = '2.2412.54';
 const qrcode = require("qrcode-terminal");
+const cron = require('node-cron');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const chat = new Client({
     puppeteer: {
