@@ -48,10 +48,10 @@ function bootstrap(chat, web) {
     }))
 
     web.post('/send', async (req, res) => {
-        const chat = req.query.to;
+        const to = req.query.to;
         const message = String(req.body);
         try {
-            const numberId = await chat.getNumberId(chat);
+            const numberId = await chat.getNumberId(to);
             const sendMessage = await chat.sendMessage(numberId._serialized, message);
             console.log("SENT", sendMessage)
         } catch (error) {

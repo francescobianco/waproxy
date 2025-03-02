@@ -30,4 +30,4 @@ test-send:
 	@curl -v -u wa:Secret1234! localhost:3000/send?to=393200466987 -d "c  iaocome asdasd stai"
 
 test-remote:
-	@curl -v -u wa:Secret1234! https://wa.yafb.net/send?to=393200466987 -d "c  iaocome asdasd stai"
+	@curl -v -u wa:$(WAPROXY_PASSWORD) https://wa.yafb.net/send?to=393200466987 -d "c  iaocome asdasd stai"
