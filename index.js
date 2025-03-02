@@ -47,6 +47,10 @@ function bootstrap(chat, web, cron) {
     web.use(auth({
         users: { 'wa': WAPROXY_PASSWORD },
     }))
+
+    cron.schedule('* * * * *', () => {
+        console.log('running a task every minute');
+    });
 }
 
 chat.on('qr', (qr) => {
