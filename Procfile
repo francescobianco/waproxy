@@ -1,3 +1,3 @@
 web: echo "A" && docker compose up waproxy
-release: echo "B" && docker compose ps && \
-		 docker compose up -d --build --force-recreate --remove-orphans
+release: [ ! -f .env ] && echo "WAPROXY_PASSWORD=$(shell openssl rand -hex 32)" > .env
+release: docker compose up -d --build --force-recreate --remove-orphans
