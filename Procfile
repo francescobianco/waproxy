@@ -1,2 +1,2 @@
-web: docker compose up --build --force-recreate --remove-orphans
-release: [ ! -f .env ] && echo "WAPROXY_PASSWORD=$(openssl rand -hex 32)" > .env || true
+web: docker compose up waproxy
+release: docker compose up -d --build --force-recreate --remove-orphans
