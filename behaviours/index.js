@@ -4,6 +4,7 @@ const webSend = require('./web-send');
 const dailyWakeup = require('./daily-wakeup');
 const dailyChessPuzzle = require('./daily-chess-puzzle');
 const statusMessage = require('./status-message');
+const chatInfo = require('./chat-info');
 
 module.exports = function(chat, web, cron) {
     sayHelloToEveryone(chat, web, cron);
@@ -12,4 +13,5 @@ module.exports = function(chat, web, cron) {
     dailyWakeup(chat, web, cron);
     dailyChessPuzzle(chat, web, cron);
     statusMessage(chat, web, cron);
+    chatInfo(chat, web, cron);
 }
