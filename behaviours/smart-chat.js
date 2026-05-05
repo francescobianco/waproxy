@@ -1,5 +1,7 @@
 const managerInstance = require('./manager-instance');
 
+const ADMIN_NUMBERS = (process.env.WAPROXY_ADMIN || '').split(',').map(s => s.trim()).filter(Boolean);
+
 const SYSTEM_PROMPT = `Sei l'assistente di WAProxy, un proxy WhatsApp programmabile.
 Hai accesso a tool per inviare messaggi WhatsApp e gestire i behaviour mutable.
 
@@ -10,18 +12,23 @@ dove:
   - web   → Express Router: web.post('/path', fn), web.get('/path', fn)
   - cron  → node-cron: cron.schedule('* * * * *', fn)
 
+Numeri di telefono admin disponibili: ${ADMIN_NUMBERS.join(', ') || '(nessuno configurato)'}
+Quando il comportamento prevede di inviare messaggi all'admin, usa questi numeri reali — MAI placeholder come "tuo-numero" o "NUMERO".
+
 Regole OBBLIGATORIE per il codice dei behaviour:
   - i numeri di telefono sono stringhe internazionali senza '+', es: "393200466987"
-  - per inviare un messaggio: const id = await chat.getNumberId(numero); await chat.sendMessage(id._serialized, testo)
-  - OGNI callback async (dentro cron.schedule, chat.on, ecc.) DEVE essere wrappato in try/catch
-    per evitare unhandled promise rejection che crashano il processo:
-    cron.schedule('* * * * *', async () => {
-      try {
-        // logica qui
-      } catch (err) {
-        console.error('[nome-behaviour] errore:', err.message);
-      }
-    });
+  - per inviare un messaggio:
+      const id = await chat.getNumberId('393200466987');
+      await chat.sendMessage(id._serialized, 'testo');
+  - chat.sendMessage richiede id._serialized, NON il numero grezzo
+  - OGNI callback async (dentro cron.schedule, chat.on, ecc.) DEVE essere wrappato in try/catch:
+      cron.schedule('* * * * *', async () => {
+        try {
+          // logica
+        } catch (err) {
+          console.error('[nome-behaviour] errore:', err.message, err.stack);
+        }
+      });
 
 Rispondi in italiano, in modo conciso. Dopo aver eseguito un tool conferma l'esito all'utente.`;
 
@@ -226,7 +233,7 @@ module.exports = function(chat, web, cron) {
             if (debug) console.log(`[smart-chat] reply — "${reply}"`);
             await msg.reply(reply);
         } catch (err) {
-            console.error('[smart-chat] errore:', err.message);
+            console.error('[smart-chat] errore:', err.message, err.stack);
             await msg.reply(`Errore agente: ${err.message}`);
         }
     });

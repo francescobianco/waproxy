@@ -20,7 +20,7 @@ function makeCron() {
     return {
         _tasks: [],
         schedule(pattern, fn) {
-            const task = { pattern, fn, destroyed: false, destroy() { this.destroyed = true; } };
+            const task = { pattern, fn, stopped: false, stop() { this.stopped = true; } };
             this._tasks.push(task);
             return task;
         }
@@ -79,11 +79,11 @@ describe('BehaviourManager', () => {
         write(dir, 'b', SRC.one_cron);
         manager.load('b');
         assert.equal(cron._tasks.length, 1);
-        assert.equal(cron._tasks[0].destroyed, false);
+        assert.equal(cron._tasks[0].stopped, false);
 
         manager.unload('b');
         assert.equal(chat.listenerCount('message'), 0);
-        assert.equal(cron._tasks[0].destroyed, true);
+        assert.equal(cron._tasks[0].stopped, true);
     });
 
     test('save() scrive il file e attiva il behaviour immediatamente', () => {

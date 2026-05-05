@@ -67,7 +67,7 @@ class BehaviourManager {
 
     _clearEntry(entry) {
         entry.listeners.forEach(({ event, fn }) => this.chat.removeListener(event, fn));
-        entry.tasks.forEach(task => task.destroy());
+        entry.tasks.forEach(task => task.stop());
         entry.listeners = [];
         entry.tasks = [];
         if (this.routers.has(entry._name)) {
