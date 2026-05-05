@@ -1,4 +1,39 @@
+const { exec } = require('child_process');
 const managerInstance = require('./manager-instance');
+
+const SHELL_TIMEOUT = parseInt(process.env.WAPROXY_SHELL_TIMEOUT || '30000', 10);
+const SHELL_MAX_OUTPUT = parseInt(process.env.WAPROXY_SHELL_MAX_OUTPUT || '4096', 10);
+
+function truncate(str, max) {
+    const s = str.trim();
+    if (s.length <= max) return s;
+    return s.slice(0, max) + `\n… [troncato, ${s.length - max} caratteri omessi]`;
+}
+
+const SHELL_BLOCKED = [
+    /node_modules/,
+    /\.map\b/,
+    /\.d\.ts\b/,
+];
+
+function shell(command) {
+    const blocked = SHELL_BLOCKED.find(re => re.test(command));
+    if (blocked) return Promise.resolve({
+        exit_code: 1,
+        stdout: '',
+        stderr: `Comando bloccato: il pattern "${blocked}" non è consentito.`,
+    });
+
+    return new Promise((resolve) => {
+        exec(command, { timeout: SHELL_TIMEOUT, maxBuffer: 1024 * 512 }, (err, stdout, stderr) => {
+            resolve({
+                exit_code: err ? (err.code ?? 1) : 0,
+                stdout: truncate(stdout, SHELL_MAX_OUTPUT),
+                stderr: truncate(stderr, SHELL_MAX_OUTPUT),
+            });
+        });
+    });
+}
 
 const ADMIN_NUMBERS = (process.env.WAPROXY_ADMIN || '').split(',').map(s => s.trim()).filter(Boolean);
 
@@ -98,6 +133,20 @@ const TOOLS = [
                 required: ['name']
             }
         }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'run_shell_command',
+            description: 'Esegue un comando shell sul server. Restituisce stdout, stderr e exit code.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    command: { type: 'string', description: 'Comando shell da eseguire' }
+                },
+                required: ['command']
+            }
+        }
     }
 ];
 
@@ -128,17 +177,42 @@ async function executeTool(name, args, chat) {
             const source = manager.show(args.name);
             return source ? { code: source } : { error: `"${args.name}" non trovato` };
         }
+        case 'run_shell_command':
+            return shell(args.command);
+
         default:
             return { error: `Tool sconosciuto: ${name}` };
     }
 }
 
-async function runAgent(userMessage, chat, debug = false) {
+const CONTEXT_TTL = parseInt(process.env.WAPROXY_CONTEXT_TTL || String(4 * 60 * 60 * 1000), 10);
+const contextHistory = new Map(); // number → [{ role, content, ts }]
+
+function loadContext(number) {
+    const now = Date.now();
+    const fresh = (contextHistory.get(number) || []).filter(e => now - e.ts < CONTEXT_TTL);
+    contextHistory.set(number, fresh);
+    return fresh.map(({ role, content }) => ({ role, content }));
+}
+
+function saveContext(number, userMessage, assistantReply) {
+    const entries = contextHistory.get(number) || [];
+    const ts = Date.now();
+    entries.push({ role: 'user', content: userMessage, ts });
+    entries.push({ role: 'assistant', content: assistantReply, ts });
+    contextHistory.set(number, entries);
+}
+
+async function runAgent(userMessage, chat, debug = false, number = null) {
     const apiKey = process.env.OPENROUTER_API_KEY;
     const model = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
 
+    const pastMessages = number ? loadContext(number) : [];
+    if (debug && pastMessages.length) console.log(`[smart-chat] contesto caricato — ${pastMessages.length} messaggi precedenti da ${number}`);
+
     const messages = [
         { role: 'system', content: SYSTEM_PROMPT },
+        ...pastMessages,
         { role: 'user', content: userMessage }
     ];
 
@@ -161,7 +235,9 @@ async function runAgent(userMessage, chat, debug = false) {
         messages.push(assistantMsg);
 
         if (choice.finish_reason === 'stop' || !assistantMsg.tool_calls?.length) {
-            return assistantMsg.content || '(nessuna risposta)';
+            const reply = assistantMsg.content || '(nessuna risposta)';
+            if (number) saveContext(number, userMessage, reply);
+            return reply;
         }
 
         for (const toolCall of assistantMsg.tool_calls) {
@@ -176,7 +252,9 @@ async function runAgent(userMessage, chat, debug = false) {
         }
     }
 
-    return 'Limite di turni agente raggiunto.';
+    const reply = 'Limite di turni agente raggiunto.';
+    if (number) saveContext(number, userMessage, reply);
+    return reply;
 }
 
 module.exports = function(chat, web, cron) {
@@ -229,7 +307,7 @@ module.exports = function(chat, web, cron) {
         if (debug) console.log(`[smart-chat] input — from: ${number}, body: "${msg.body}"`);
 
         try {
-            const reply = await runAgent(msg.body, chat, debug);
+            const reply = await runAgent(msg.body, chat, debug, number);
             if (debug) console.log(`[smart-chat] reply — "${reply}"`);
             await msg.reply(reply);
         } catch (err) {
