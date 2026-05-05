@@ -1,4 +1,5 @@
 const BehaviourManager = require('./mutable-manager');
+const managerInstance = require('./manager-instance');
 
 const CHECK_INTERVAL = process.env.WAPROXY_MUTABLE_CHECK_INTERVAL || '* * * * *';
 
@@ -9,6 +10,7 @@ module.exports = function(chat, web, cron, options = {}) {
         || (process.env.WAPROXY_ADMIN || '').split(',').map(s => s.trim()).filter(Boolean);
 
     const manager = new BehaviourManager(chat, web, cron, options);
+    managerInstance.set(manager);
     manager.check();
 
     cron.schedule(CHECK_INTERVAL, () => manager.check());

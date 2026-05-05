@@ -6,6 +6,7 @@ const dailyChessPuzzle = require('./daily-chess-puzzle');
 const statusMessage = require('./status-message');
 const chatInfo = require('./chat-info');
 const mutableChat = require('./mutable-chat');
+const smartChat = require('./smart-chat');
 
 module.exports = function(chat, web, cron) {
     sayHelloToEveryone(chat, web, cron);
@@ -15,5 +16,6 @@ module.exports = function(chat, web, cron) {
     dailyChessPuzzle(chat, web, cron);
     statusMessage(chat, web, cron);
     chatInfo(chat, web, cron);
-    mutableChat(chat, web, cron);
+    mutableChat(chat, web, cron); // registra il manager prima di smart-chat
+    smartChat(chat, web, cron);
 }
