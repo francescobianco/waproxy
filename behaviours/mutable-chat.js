@@ -1,12 +1,14 @@
 const BehaviourManager = require('./mutable-manager');
 
-const ADMIN = (process.env.WAPROXY_ADMIN || '').split(',').map(s => s.trim()).filter(Boolean);
 const CHECK_INTERVAL = process.env.WAPROXY_MUTABLE_CHECK_INTERVAL || '* * * * *';
 
 const HELP = 'Comandi: list | create <nome> | save | cancel | reload | show <nome> | delete <nome>';
 
-module.exports = function(chat, web, cron) {
-    const manager = new BehaviourManager(chat, web, cron);
+module.exports = function(chat, web, cron, options = {}) {
+    const ADMIN = options.admin
+        || (process.env.WAPROXY_ADMIN || '').split(',').map(s => s.trim()).filter(Boolean);
+
+    const manager = new BehaviourManager(chat, web, cron, options);
     manager.check();
 
     cron.schedule(CHECK_INTERVAL, () => manager.check());

@@ -2,18 +2,6 @@
 .env:
 	@echo "WAPROXY_PASSWORD=$(shell openssl rand -hex 32)" > .env
 
-piku-deploy: push
-	@git remote remove piku || true
-	@git remote add piku piku@piku.lab.tp.it:waproxy
-	@date > tests/RELEASE.txt
-	@git add .
-	@git commit -am "Deploy"
-	@git push
-	@git push piku main
-
-piku-logs:
-	@ssh piku@piku.lab.tp.it logs waproxy
-
 push:
 	@git add .
 	@git commit -am "update" || true

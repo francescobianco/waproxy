@@ -8,13 +8,13 @@ const MUTABLE_DIR = process.env.WAPROXY_DATA_DIR
     : path.join(__dirname, 'mutable');
 
 class BehaviourManager {
-    constructor(chat, web, cron) {
+    constructor(chat, web, cron, options = {}) {
         this.chat = chat;
         this.web = web;
         this.cron = cron;
         this.registry = new Map(); // name → { md5, listeners, tasks }
         this.routers = new Map();  // name → Express.Router (mounted once, reused)
-        this.dir = MUTABLE_DIR;
+        this.dir = options.dir || MUTABLE_DIR;
     }
 
     _md5(content) {
@@ -121,7 +121,7 @@ class BehaviourManager {
     check() {
         const results = { added: [], reloaded: [], removed: [] };
 
-        for (const [name, entry] of this.registry) {
+        for (const [name, entry] of [...this.registry]) {
             const filePath = path.join(this.dir, `${name}.js`);
             if (!fs.existsSync(filePath)) {
                 this.unload(name);
