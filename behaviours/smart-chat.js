@@ -10,10 +10,18 @@ dove:
   - web   → Express Router: web.post('/path', fn), web.get('/path', fn)
   - cron  → node-cron: cron.schedule('* * * * *', fn)
 
-Regole per il codice dei behaviour:
-  - usa await/async quando chiami chat.getNumberId o chat.sendMessage
+Regole OBBLIGATORIE per il codice dei behaviour:
   - i numeri di telefono sono stringhe internazionali senza '+', es: "393200466987"
   - per inviare un messaggio: const id = await chat.getNumberId(numero); await chat.sendMessage(id._serialized, testo)
+  - OGNI callback async (dentro cron.schedule, chat.on, ecc.) DEVE essere wrappato in try/catch
+    per evitare unhandled promise rejection che crashano il processo:
+    cron.schedule('* * * * *', async () => {
+      try {
+        // logica qui
+      } catch (err) {
+        console.error('[nome-behaviour] errore:', err.message);
+      }
+    });
 
 Rispondi in italiano, in modo conciso. Dopo aver eseguito un tool conferma l'esito all'utente.`;
 
@@ -118,7 +126,7 @@ async function executeTool(name, args, chat) {
     }
 }
 
-async function runAgent(userMessage, chat) {
+async function runAgent(userMessage, chat, debug = false) {
     const apiKey = process.env.OPENROUTER_API_KEY;
     const model = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
 
@@ -152,7 +160,7 @@ async function runAgent(userMessage, chat) {
         for (const toolCall of assistantMsg.tool_calls) {
             const args = JSON.parse(toolCall.function.arguments);
             const result = await executeTool(toolCall.function.name, args, chat);
-            console.log(`[smart-chat] tool ${toolCall.function.name}`, args, '→', result);
+            if (debug) console.log(`[smart-chat] tool ${toolCall.function.name}`, JSON.stringify(args), '→', JSON.stringify(result));
             messages.push({
                 role: 'tool',
                 tool_call_id: toolCall.id,
@@ -172,14 +180,50 @@ module.exports = function(chat, web, cron) {
         return;
     }
 
-    const isAdmin = (msg) => ADMIN.includes(msg.from.replace('@c.us', ''));
+    const debug = process.env.WAPROXY_LOG === 'debug';
+
+    const resolveNumber = async (msg) => {
+        if (debug) {
+            const allProps = {};
+            for (const k of Object.keys(msg)) {
+                try { allProps[k] = msg[k]; } catch (_) {}
+            }
+            console.log('[smart-chat] msg keys:', Object.keys(msg).join(', '));
+            console.log('[smart-chat] msg dump:', JSON.stringify(allProps, null, 2));
+            try {
+                const contact = await msg.getContact();
+                console.log('[smart-chat] contact dump:', JSON.stringify({
+                    number: contact.number,
+                    name: contact.name,
+                    pushname: contact.pushname,
+                    shortName: contact.shortName,
+                    id: contact.id,
+                }, null, 2));
+            } catch (e) {
+                console.log('[smart-chat] getContact error:', e.message);
+            }
+        }
+
+        // contact.id.user contiene il numero reale anche quando msg.from è un LID
+        try {
+            const contact = await msg.getContact();
+            if (contact?.id?.user) return contact.id.user;
+        } catch (_) {}
+        return msg.from.replace(/@.*$/, '');
+    };
 
     chat.on('message', async msg => {
-        if (!isAdmin(msg)) return;
+        const number = await resolveNumber(msg);
+        const isAdmin = ADMIN.includes(number);
+        if (debug) console.log(`[smart-chat] isAdmin — number: "${number}", admins: [${ADMIN.join(', ')}], result: ${isAdmin}`);
+        if (!isAdmin) return;
         if (msg.body.startsWith('/')) return; // comandi espliciti gestiti da altri behaviour
 
+        if (debug) console.log(`[smart-chat] input — from: ${number}, body: "${msg.body}"`);
+
         try {
-            const reply = await runAgent(msg.body, chat);
+            const reply = await runAgent(msg.body, chat, debug);
+            if (debug) console.log(`[smart-chat] reply — "${reply}"`);
             await msg.reply(reply);
         } catch (err) {
             console.error('[smart-chat] errore:', err.message);
