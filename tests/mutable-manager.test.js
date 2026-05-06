@@ -193,7 +193,7 @@ describe('BehaviourManager', () => {
         const dir = makeDir(base);
         const manager = new BehaviourManager(makeChat(), makeWeb(), makeCron(), { dir });
 
-        write(dir, 'top-level-error', `chat.sendMessage('x', 'y');`);
+        write(dir, 'top-level-error', `chat.sendMessage('x', 'y'); module.exports = function() {};`);
         const result = manager.check();
 
         assert.equal(result.errors.length, 1);

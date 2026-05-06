@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test tests/mutable-manager.test.js tests/mutable-chat.test.js"
+    "test": "node --test tests/mutable-manager.test.js tests/mutable-chat.test.js tests/agent.test.js"
   },
   "repository": {
     "type": "git",

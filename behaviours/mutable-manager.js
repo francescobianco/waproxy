@@ -40,6 +40,14 @@ class BehaviourManager {
         return invalidPath;
     }
 
+    _validateSourceContract(name, source) {
+        if (!/module\.exports\s*=\s*(?:async\s+)?function\b/.test(source)) {
+            throw new TypeError(
+                `Behaviour "${name}" non valido: il file deve esportare una funzione con module.exports = function(chat, web, cron) { ... }`
+            );
+        }
+    }
+
     _getRouter(name) {
         if (!this.routers.has(name)) {
             const router = express.Router();
@@ -104,6 +112,7 @@ class BehaviourManager {
         const filePath = this._filePath(name);
         const source = fs.readFileSync(filePath, 'utf8');
         const md5 = this._md5(source);
+        this._validateSourceContract(name, source);
 
         if (this.registry.has(name)) {
             this._clearEntry(this.registry.get(name));

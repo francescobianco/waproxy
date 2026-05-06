@@ -37,6 +37,7 @@ const ADMIN_NUMBERS = (process.env.WAPROXY_ADMIN || '').split(',').map(s => s.tr
 let _sharedChat = null;
 let _candidates = null;
 let _candidateIdx = 0;
+let _firstPaidIdx = 0;
 
 function modelCost(m) {
     return parseFloat(m.pricing?.prompt || '0') + parseFloat(m.pricing?.completion || '0');
@@ -62,6 +63,7 @@ async function loadCandidates(apiKey) {
 
     _candidates = [...freeTier, ...paid];
     _candidateIdx = 0;
+    _firstPaidIdx = freeTier.length;
 
     console.log(`[agent] candidati: ${freeTier.length} free + ${paid.length} paid`);
     if (freeTier.length) console.log(`[agent] primo free: ${freeTier[0].id}`);
@@ -74,9 +76,13 @@ function currentModel() {
     return _candidates[_candidateIdx].id;
 }
 
-function advanceModel(label) {
+function advanceModel(label, options = {}) {
     if (process.env.OPENROUTER_MODEL || !_candidates) return false;
-    _candidateIdx++;
+    if (options.preferPaid && _candidateIdx < _firstPaidIdx && _firstPaidIdx < _candidates.length) {
+        _candidateIdx = _firstPaidIdx;
+    } else {
+        _candidateIdx++;
+    }
     if (_candidateIdx >= _candidates.length) {
         console.warn(`[agent:${label}] nessun altro modello disponibile`);
         return false;
@@ -85,6 +91,15 @@ function advanceModel(label) {
     const cost = modelCost(next);
     console.log(`[agent:${label}] fallback → ${next.id} [${cost === 0 ? 'free' : `~${cost.toExponential(2)}/tok`}]`);
     return true;
+}
+
+function parseDirectSendMemo(memo) {
+    if (typeof memo !== 'string') return null;
+
+    const match = memo.match(/(?:^|[.:]\s*)(?:azione\s+terminale:\s*)?(?:prossimo:\s*)?invia\s+(?:esattamente\s+)?(?:questo\s+testo:?\s*)?["“](.*)["”](?:\s*(?:e\s+)?non\s+schedulare\s+altro)?\s*\.?$/iu);
+    if (!match) return null;
+
+    return match[1];
 }
 
 // --- System prompts ---
@@ -124,6 +139,8 @@ Richiesta asincrona (azioni future, ripetute o posticipate):
   2. Genera in anticipo TUTTO il contenuto dei messaggi futuri e includilo nei memo
      — il LLM nelle iterazioni successive NON ha contesto su questa conversazione,
        quindi il memo deve essere autosufficiente (es: "invia esattamente questo testo: ...")
+     — se scheduli un batch completo di azioni indipendenti, ogni memo DEVE essere terminale:
+       "AZIONE TERMINALE: invia esattamente questo testo: \"...\" e non schedulare altro"
   3. Chiama agent_next(memo), agent_timeout(seconds, memo) o agent_event(type, memo)
   4. Rispondi all'admin con una conferma di AVVIO breve (es: "▶ avviato")
      — MAI descrivere azioni future come già accadute
@@ -147,6 +164,10 @@ Numeri di telefono admin disponibili: ${ADMIN_NUMBERS.join(', ') || '(nessuno co
 Esegui ESATTAMENTE ciò che il memo descrive. Il memo è autosufficiente: non inventare
 contenuti non specificati. Se il memo dice "invia questo testo: ...", invia quel testo
 preciso senza modifiche o integrazioni.
+
+Se il memo contiene "AZIONE TERMINALE" o è solo un invio puntuale già completo,
+invia il messaggio e termina:
+NON chiamare agent_next, agent_timeout o agent_event.
 
 Se la catena deve continuare, chiama agent_next(memo), agent_timeout(seconds, memo)
 o agent_event(type, memo). Il memo del passo successivo deve includere tutto il contenuto
@@ -398,11 +419,11 @@ class Agent {
     }
 
     scheduleNext(memo) {
-        this._insertSorted({ executeAt: Date.now(), memo, run: () => this._executeIteration(memo, null) });
+        this._insertSorted({ executeAt: Date.now(), memo, run: () => this._runScheduledMemo(memo, null) });
     }
 
     scheduleTimeout(seconds, memo) {
-        this._insertSorted({ executeAt: Date.now() + seconds * 1000, memo, run: () => this._executeIteration(memo, null) });
+        this._insertSorted({ executeAt: Date.now() + seconds * 1000, memo, run: () => this._runScheduledMemo(memo, null) });
     }
 
     kill(pattern) {
@@ -430,7 +451,7 @@ class Agent {
         if (!queue || !queue.length) return false;
         const { memo } = queue.shift();
         if (!queue.length) this._pendingEvents.delete(type);
-        this._insertSorted({ executeAt: Date.now(), memo, run: () => this._executeIteration(memo, { type, data }) });
+        this._insertSorted({ executeAt: Date.now(), memo, run: () => this._runScheduledMemo(memo, { type, data }) });
         return true;
     }
 
@@ -516,7 +537,7 @@ class Agent {
 
             if (debug) console.log(`[agent:${label}] uso modello: ${model}`);
 
-            let rateLimited = false;
+            let advancedAfterRateLimit = false;
 
             for (let turn = 0; turn < 10; turn++) {
                 const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -531,7 +552,7 @@ class Agent {
 
                 if (res.status === 429) {
                     console.warn(`[agent:${label}] modello ${model} rate-limited (429), provo il prossimo...`);
-                    rateLimited = !advanceModel(label);
+                    advancedAfterRateLimit = advanceModel(label, { preferPaid: true });
                     break;
                 }
 
@@ -559,8 +580,8 @@ class Agent {
                 if (chainHandedOff) return assistantMsg.content || null;
             }
 
-            if (rateLimited) throw new Error('Tutti i modelli sono rate-limited. Riprova tra qualche minuto.');
-            if (!rateLimited) break;
+            if (advancedAfterRateLimit) continue;
+            break;
         }
 
         return 'Limite di turni agente raggiunto.';
@@ -606,6 +627,20 @@ class Agent {
         ];
 
         await this._runLoop(messages, apiKey, debug);
+    }
+
+    async _runScheduledMemo(memo, event) {
+        if (!event) {
+            const message = parseDirectSendMemo(memo);
+            if (message !== null) {
+                const debug = process.env.WAPROXY_LOG === 'debug';
+                if (debug) console.log(`[agent:${this._number}] direct-send memo → ${JSON.stringify(message)}`);
+                await this._executeTool('send_whatsapp_message', { to: this._number, message });
+                return;
+            }
+        }
+
+        await this._executeIteration(memo, event);
     }
 
     // --- Public API ---
