@@ -59,7 +59,8 @@ module.exports = function(chat, web, cron) {
         try {
             const reply = await agent.handleMessage(msg.body);
             if (debug) console.log(`[smart-chat] reply — "${reply}"`);
-            await msg.reply(reply);
+            // null = il LLM ha schedulato una catena asincrona, nessuna risposta sincrona
+            if (reply !== null) await msg.reply(reply);
         } catch (err) {
             console.error('[smart-chat] errore:', err.message, err.stack);
             await msg.reply(`Errore agente: ${err.message}`);

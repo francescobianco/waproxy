@@ -307,21 +307,84 @@ const TOOLS = [
     },
 ];
 
+// Tool che segnalano il passaggio della catena a un'iterazione successiva.
+// Quando uno di questi viene chiamato, il loop si ferma immediatamente.
+const SCHEDULING_TOOLS = new Set(['agent_next', 'agent_timeout', 'agent_event']);
+
 // --- Context TTL ---
 
 const CONTEXT_TTL = parseInt(process.env.WAPROXY_CONTEXT_TTL || String(4 * 60 * 60 * 1000), 10);
 
 // --- Agent class (one instance per admin number) ---
+//
+// Loop model: thread infinito bloccato da un gate (semaforo binario).
+// Default: spento. Si accende a impulsi (_pulse).
+// Prima azione al risveglio: spegnere il gate (auto-off, retroazione negativa).
+// Il loop svuota tutta la coda poi torna a dormire — una sola pallina alla volta.
 
 class Agent {
     constructor(number) {
         this._number = number;
         this._goal = '';
-        this._pending = new Map(); // id → { memo, handle, type }
+        this._history = [];
         this._pendingEvents = new Map(); // eventType → [{ memo }]
-        this._nextId = 0;
-        this._history = []; // conversation history for this user
+        this._queue = []; // [{ executeAt, memo, run }] ordinata per executeAt
+        this._gate = null; // fn per aprire il gate; null mentre il loop è in esecuzione
+        // Avvia il loop in background — gira per tutta la vita del processo
+        this._loop().catch(err =>
+            console.error(`[agent:${this._number}] loop crash:`, err)
+        );
     }
+
+    // --- Infinite loop (una sola pallina) ---
+
+    async _loop() {
+        while (true) {
+            // Dorme finché _pulse() apre il gate
+            await new Promise(resolve => { this._gate = resolve; });
+            // Prima azione: spegnere il gate (auto-off)
+            this._gate = null;
+
+            // Svuota la coda — tick per tick, in ordine temporale
+            while (this._queue.length) {
+                const next = this._queue[0];
+                const delay = next.executeAt - Date.now();
+
+                if (delay > 0) {
+                    // Aspetta il momento giusto; il gate resta disponibile così
+                    // un _pulse() con un item più urgente può interrompere l'attesa.
+                    await new Promise(resolve => {
+                        const timer = setTimeout(resolve, delay);
+                        this._gate = () => { clearTimeout(timer); resolve(); };
+                    });
+                    this._gate = null;
+                    continue; // ricontrolla la testa (potrebbe essere arrivato un item prima)
+                }
+
+                const { memo, run } = this._queue.shift();
+                if (process.env.WAPROXY_LOG === 'debug' && memo)
+                    console.log(`[agent:${this._number}] tick — memo: "${memo}"`);
+                try { await run(); }
+                catch (err) { console.error(`[agent:${this._number}] tick errore:`, err.message, err.stack); }
+                // Pallina tornata — controlla se c'è altro in coda
+            }
+            // Coda vuota: il loop torna a dormire
+        }
+    }
+
+    _pulse() {
+        if (this._gate) this._gate();
+        // Se gate è null il loop sta già girando e troverà i nuovi item nel while
+    }
+
+    _insertSorted(item) {
+        let i = this._queue.length;
+        while (i > 0 && this._queue[i - 1].executeAt > item.executeAt) i--;
+        this._queue.splice(i, 0, item);
+        this._pulse();
+    }
+
+    // --- Scheduling ---
 
     addGoal(description) {
         const now = new Date();
@@ -331,40 +394,24 @@ class Agent {
     }
 
     scheduleNext(memo) {
-        const id = this._nextId++;
-        const handle = setImmediate(() => {
-            this._pending.delete(id);
-            this.runIteration(memo);
-        });
-        this._pending.set(id, { memo, handle, type: 'immediate' });
+        this._insertSorted({ executeAt: Date.now(), memo, run: () => this._executeIteration(memo, null) });
     }
 
     scheduleTimeout(seconds, memo) {
-        const id = this._nextId++;
-        const handle = setTimeout(() => {
-            this._pending.delete(id);
-            this.runIteration(memo);
-        }, seconds * 1000);
-        this._pending.set(id, { memo, handle, type: 'timeout' });
+        this._insertSorted({ executeAt: Date.now() + seconds * 1000, memo, run: () => this._executeIteration(memo, null) });
     }
 
     kill(pattern) {
-        let count = 0;
-        for (const [id, { memo, handle, type }] of [...this._pending]) {
-            if (memo.includes(pattern)) {
-                if (type === 'immediate') clearImmediate(handle);
-                else clearTimeout(handle);
-                this._pending.delete(id);
-                count++;
-            }
-        }
+        const before = this._queue.length;
+        this._queue = this._queue.filter(item => !item.memo?.includes(pattern));
+        let count = before - this._queue.length;
         for (const [eventType, queue] of [...this._pendingEvents]) {
-            const before = queue.length;
             const filtered = queue.filter(e => !e.memo.includes(pattern));
-            count += before - filtered.length;
+            count += queue.length - filtered.length;
             if (filtered.length) this._pendingEvents.set(eventType, filtered);
             else this._pendingEvents.delete(eventType);
         }
+        if (count > 0) this._kickRunner();
         return count;
     }
 
@@ -374,13 +421,12 @@ class Agent {
         this._pendingEvents.set(type, queue);
     }
 
-    // Returns true if an event was consumed and an iteration was launched.
     fireEvent(type, data = {}) {
         const queue = this._pendingEvents.get(type);
         if (!queue || !queue.length) return false;
         const { memo } = queue.shift();
         if (!queue.length) this._pendingEvents.delete(type);
-        this.runIteration(memo, { type, data });
+        this._insertSorted({ executeAt: Date.now(), memo, run: () => this._executeIteration(memo, { type, data }) });
         return true;
     }
 
@@ -452,6 +498,8 @@ class Agent {
 
     // --- LLM loop ---
 
+    // Ritorna null se un scheduling tool è stato chiamato (catena passata al prossimo tick).
+    // Ritorna stringa con la risposta testuale altrimenti.
     async _runLoop(messages, apiKey, debug) {
         const label = this._number;
         while (true) {
@@ -490,16 +538,17 @@ class Agent {
                     return assistantMsg.content || '(nessuna risposta)';
                 }
 
+                let chainHandedOff = false;
                 for (const toolCall of assistantMsg.tool_calls) {
                     const args = JSON.parse(toolCall.function.arguments);
                     const result = await this._executeTool(toolCall.function.name, args);
                     if (debug) console.log(`[agent:${label}] tool ${toolCall.function.name}`, JSON.stringify(args), '→', JSON.stringify(result));
-                    messages.push({
-                        role: 'tool',
-                        tool_call_id: toolCall.id,
-                        content: JSON.stringify(result)
-                    });
+                    messages.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify(result) });
+                    if (SCHEDULING_TOOLS.has(toolCall.function.name)) chainHandedOff = true;
                 }
+
+                // Scheduling tool chiamato: il tick corrente è finito, il prossimo è in coda.
+                if (chainHandedOff) return assistantMsg.content || null;
             }
 
             if (rateLimited) throw new Error('Tutti i modelli sono rate-limited. Riprova tra qualche minuto.');
@@ -509,9 +558,9 @@ class Agent {
         return 'Limite di turni agente raggiunto.';
     }
 
-    // --- Public API ---
+    // --- Tick implementations ---
 
-    async handleMessage(userMessage) {
+    async _doHandleMessage(userMessage) {
         const apiKey = process.env.OPENROUTER_API_KEY;
         const debug = process.env.WAPROXY_LOG === 'debug';
 
@@ -529,32 +578,43 @@ class Agent {
         ];
 
         const reply = await this._runLoop(messages, apiKey, debug);
-        this._saveContext(userMessage, reply);
+        if (reply !== null) this._saveContext(userMessage, reply);
         return reply;
     }
 
-    async runIteration(memo, event = null) {
+    async _executeIteration(memo, event) {
         const apiKey = process.env.OPENROUTER_API_KEY;
         const debug = process.env.WAPROXY_LOG === 'debug';
 
-        if (debug) console.log(`[agent:${this._number}] runIteration — memo: "${memo}"${event ? `, event: ${event.type}` : ''}`);
+        await loadCandidates(apiKey);
 
-        try {
-            await loadCandidates(apiKey);
+        const userContent = event
+            ? `Esegui il memo: ${memo}\n\nEvento "${event.type}" ricevuto:\n${JSON.stringify(event.data, null, 2)}`
+            : `Esegui il memo: ${memo}`;
 
-            const userContent = event
-                ? `Esegui il memo: ${memo}\n\nEvento "${event.type}" ricevuto:\n${JSON.stringify(event.data, null, 2)}`
-                : `Esegui il memo: ${memo}`;
+        const messages = [
+            { role: 'system', content: iterationPrompt(this._number, this._goal, memo) },
+            { role: 'user', content: userContent }
+        ];
 
-            const messages = [
-                { role: 'system', content: iterationPrompt(this._number, this._goal, memo) },
-                { role: 'user', content: userContent }
-            ];
+        await this._runLoop(messages, apiKey, debug);
+    }
 
-            await this._runLoop(messages, apiKey, debug);
-        } catch (err) {
-            console.error(`[agent:${this._number}] errore in iterazione "${memo}":`, err.message, err.stack);
-        }
+    // --- Public API ---
+
+    // I messaggi admin vanno in testa alla coda (priorità sulle iterazioni autonome).
+    handleMessage(userMessage) {
+        return new Promise((resolve, reject) => {
+            this._queue.unshift({
+                executeAt: Date.now(),
+                memo: null,
+                run: async () => {
+                    try { resolve(await this._doHandleMessage(userMessage)); }
+                    catch (err) { reject(err); }
+                }
+            });
+            this._kickRunner();
+        });
     }
 }
 
