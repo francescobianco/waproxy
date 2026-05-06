@@ -190,28 +190,38 @@ async function executeTool(name, args, chat) {
 let _candidates = null; // lista ordinata di modelli free, null = non ancora caricata
 let _candidateIdx = 0;  // puntatore al modello corrente
 
+function modelCost(m) {
+    return parseFloat(m.pricing?.prompt || '0') + parseFloat(m.pricing?.completion || '0');
+}
+
 async function loadCandidates(apiKey) {
     if (_candidates !== null) return;
 
-    console.log('[smart-chat] discovery modelli free su OpenRouter...');
+    console.log('[smart-chat] discovery modelli su OpenRouter...');
     const res = await fetch('https://openrouter.ai/api/v1/models', {
         headers: { 'Authorization': `Bearer ${apiKey}` }
     });
     if (!res.ok) throw new Error(`OpenRouter models API: ${res.status}`);
     const { data } = await res.json();
 
-    const free = data.filter(m =>
-        m.pricing?.prompt === '0' && m.pricing?.completion === '0'
-    );
-    if (!free.length) throw new Error('Nessun modello gratuito disponibile su OpenRouter');
+    const hasTools = m => m.supported_parameters?.includes('tools');
 
-    const withTools = free.filter(m => m.supported_parameters?.includes('tools'));
-    const ranked = withTools.length ? withTools : free;
-    ranked.sort((a, b) => (b.context_length || 0) - (a.context_length || 0));
+    // --- free ---
+    const free = data.filter(m => modelCost(m) === 0);
+    const freeWithTools = free.filter(hasTools);
+    const freeTier = freeWithTools.length ? freeWithTools : free;
+    freeTier.sort((a, b) => (b.context_length || 0) - (a.context_length || 0));
 
-    _candidates = ranked;
+    // --- cheap paid (con tool support, ordinati per costo asc) ---
+    const paid = data.filter(m => modelCost(m) > 0 && hasTools(m));
+    paid.sort((a, b) => modelCost(a) - modelCost(b));
+
+    _candidates = [...freeTier, ...paid];
     _candidateIdx = 0;
-    console.log(`[smart-chat] trovati ${ranked.length} modelli free con tool support`);
+
+    console.log(`[smart-chat] candidati: ${freeTier.length} free + ${paid.length} paid (ordinati per costo)`);
+    if (freeTier.length) console.log(`[smart-chat] primo modello free: ${freeTier[0].id}`);
+    if (paid.length) console.log(`[smart-chat] primo modello paid: ${paid[0].id} (costo/tok: ${modelCost(paid[0]).toExponential(2)})`);
 }
 
 function currentModel() {
@@ -223,12 +233,15 @@ function currentModel() {
 function advanceModel() {
     if (process.env.OPENROUTER_MODEL || !_candidates) return false;
     _candidateIdx++;
-    if (_candidateIdx < _candidates.length) {
-        console.log(`[smart-chat] fallback al prossimo modello: ${_candidates[_candidateIdx].id}`);
-        return true;
+    if (_candidateIdx >= _candidates.length) {
+        console.warn('[smart-chat] nessun altro modello disponibile');
+        return false;
     }
-    console.warn('[smart-chat] nessun altro modello free disponibile');
-    return false;
+    const next = _candidates[_candidateIdx];
+    const cost = modelCost(next);
+    const tier = cost === 0 ? 'free' : `paid ~${cost.toExponential(2)}/tok`;
+    console.log(`[smart-chat] fallback → ${next.id} [${tier}]`);
+    return true;
 }
 
 // --- conversation context ---
