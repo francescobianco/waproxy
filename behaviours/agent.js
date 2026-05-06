@@ -411,7 +411,7 @@ class Agent {
             if (filtered.length) this._pendingEvents.set(eventType, filtered);
             else this._pendingEvents.delete(eventType);
         }
-        if (count > 0) this._kickRunner();
+        if (count > 0) this._pulse();
         return count;
     }
 
@@ -613,7 +613,7 @@ class Agent {
                     catch (err) { reject(err); }
                 }
             });
-            this._kickRunner();
+            this._pulse();
         });
     }
 }
