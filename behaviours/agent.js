@@ -90,6 +90,9 @@ function advanceModel(label) {
 // --- System prompts ---
 
 const BEHAVIOUR_RULES = `Regole OBBLIGATORIE per il codice dei behaviour:
+  - crea un behaviour SOLO per automazioni permanenti o listener riutilizzabili; per countdown, reminder, azioni ritardate o sequenze temporanee usa agent_next/agent_timeout
+  - il codice DEVE esportare una funzione CommonJS: module.exports = function(chat, web, cron) { ... }
+  - NON usare IIFE, codice top-level async o variabili globali come chat/web/cron fuori dalla funzione esportata
   - i numeri di telefono sono stringhe internazionali senza '+', es: "393200466987"
   - per inviare un messaggio:
       const id = await chat.getNumberId('393200466987');
@@ -125,6 +128,7 @@ Richiesta asincrona (azioni future, ripetute o posticipate):
   4. Rispondi all'admin con una conferma di AVVIO breve (es: "▶ avviato")
      — MAI descrivere azioni future come già accadute
      — MAI ripetere il contenuto che verrà inviato nelle iterazioni
+  → NON creare behaviour mutable per task temporanei come countdown, timer o reminder singoli.
 
 Rispondi in italiano, in modo conciso.`;
 }
@@ -180,12 +184,12 @@ const TOOLS = [
         type: 'function',
         function: {
             name: 'create_behaviour',
-            description: 'Crea o aggiorna un behaviour mutable. Attivo immediatamente senza riavvio.',
+            description: 'Crea o aggiorna un behaviour mutable permanente. NON usare per countdown, timer, reminder singoli o sequenze temporanee: per quelli usare agent_timeout/agent_next.',
             parameters: {
                 type: 'object',
                 properties: {
                     name: { type: 'string', description: 'Nome del behaviour, solo lettere minuscole e trattini' },
-                    code: { type: 'string', description: 'Codice JavaScript completo del behaviour' }
+                    code: { type: 'string', description: 'Codice JavaScript completo. Deve essere CommonJS e iniziare dal contratto: module.exports = function(chat, web, cron) { ... }' }
                 },
                 required: ['name', 'code']
             }
@@ -460,8 +464,12 @@ class Agent {
                 return { behaviours: manager ? manager.list() : [] };
             case 'create_behaviour': {
                 if (!manager) return { error: 'BehaviourManager non disponibile' };
-                const md5 = manager.save(args.name, args.code);
-                return { ok: true, name: args.name, md5 };
+                try {
+                    const md5 = manager.save(args.name, args.code);
+                    return { ok: true, name: args.name, md5 };
+                } catch (err) {
+                    return { error: err.message };
+                }
             }
             case 'delete_behaviour': {
                 if (!manager) return { error: 'BehaviourManager non disponibile' };

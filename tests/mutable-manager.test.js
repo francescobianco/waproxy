@@ -97,6 +97,33 @@ describe('BehaviourManager', () => {
         assert.ok(fs.existsSync(path.join(dir, 'c.js')));
     });
 
+    test('save() rifiuta sorgenti che non esportano una funzione', () => {
+        const dir = makeDir(base);
+        const manager = new BehaviourManager(makeChat(), makeWeb(), makeCron(), { dir });
+
+        assert.throws(
+            () => manager.save('bad', `const topLevelOnly = true;`),
+            /deve esportare una funzione/
+        );
+        assert.equal(manager.list().some(item => item.name === 'bad'), false);
+        assert.equal(fs.existsSync(path.join(dir, 'bad.js')), false);
+    });
+
+    test('save() ripristina il sorgente precedente se un aggiornamento non è valido', () => {
+        const dir = makeDir(base);
+        const chat = makeChat();
+        const manager = new BehaviourManager(chat, makeWeb(), makeCron(), { dir });
+
+        manager.save('stable', SRC.one_listener);
+
+        assert.throws(
+            () => manager.save('stable', `const broken = true;`),
+            /deve esportare una funzione/
+        );
+        assert.equal(manager.show('stable'), SRC.one_listener);
+        assert.equal(chat.listenerCount('message'), 1);
+    });
+
     test('delete() rimuove listener e file su disco', () => {
         const dir = makeDir(base);
         const chat = makeChat();
@@ -142,6 +169,21 @@ describe('BehaviourManager', () => {
         const result = manager.check();
 
         assert.ok(result.added.includes('g'));
+        assert.equal(chat.listenerCount('message'), 1);
+    });
+
+    test('check() segnala file invalidi senza interrompere il reload', () => {
+        const dir = makeDir(base);
+        const chat = makeChat();
+        const manager = new BehaviourManager(chat, makeWeb(), makeCron(), { dir });
+
+        write(dir, 'invalid', `const broken = true;`);
+        write(dir, 'valid', SRC.one_listener);
+        const result = manager.check();
+
+        assert.ok(result.added.includes('valid'));
+        assert.equal(result.errors.length, 1);
+        assert.equal(result.errors[0].name, 'invalid');
         assert.equal(chat.listenerCount('message'), 1);
     });
 

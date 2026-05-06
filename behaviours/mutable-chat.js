@@ -73,6 +73,7 @@ module.exports = function(chat, web, cron, options = {}) {
                     if (result.added.length)    lines.push(`Aggiunti: ${result.added.join(', ')}`);
                     if (result.reloaded.length) lines.push(`Ricaricati: ${result.reloaded.join(', ')}`);
                     if (result.removed.length)  lines.push(`Rimossi: ${result.removed.join(', ')}`);
+                    if (result.errors.length)   lines.push('Errori:\n' + result.errors.map(e => `- ${e.name}: ${e.error}`).join('\n'));
                     return msg.reply(lines.length ? lines.join('\n') : 'Nessuna modifica rilevata.');
                 }
 

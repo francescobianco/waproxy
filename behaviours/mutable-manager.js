@@ -59,8 +59,14 @@ class BehaviourManager {
 
     _execute(name, entry) {
         const filePath = path.join(this.dir, `${name}.js`);
-        delete require.cache[filePath];
+        const modulePath = require.resolve(filePath);
+        delete require.cache[modulePath];
         const fn = require(filePath);
+        if (typeof fn !== 'function') {
+            throw new TypeError(
+                `Behaviour "${name}" non valido: il file deve esportare una funzione con module.exports = function(chat, web, cron) { ... }`
+            );
+        }
         const { chatProxy, cronProxy, router } = this._makeProxies(name, entry);
         fn(chatProxy, router, cronProxy);
     }
@@ -86,7 +92,13 @@ class BehaviourManager {
 
         const entry = { _name: name, md5, listeners: [], tasks: [] };
         this.registry.set(name, entry);
-        this._execute(name, entry);
+        try {
+            this._execute(name, entry);
+        } catch (err) {
+            this._clearEntry(entry);
+            this.registry.delete(name);
+            throw err;
+        }
         return md5;
     }
 
@@ -99,8 +111,21 @@ class BehaviourManager {
 
     save(name, source) {
         if (!fs.existsSync(this.dir)) fs.mkdirSync(this.dir, { recursive: true });
-        fs.writeFileSync(path.join(this.dir, `${name}.js`), source, 'utf8');
-        return this.load(name);
+        const filePath = path.join(this.dir, `${name}.js`);
+        const previous = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : null;
+
+        fs.writeFileSync(filePath, source, 'utf8');
+        try {
+            return this.load(name);
+        } catch (err) {
+            if (previous === null) {
+                if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            } else {
+                fs.writeFileSync(filePath, previous, 'utf8');
+                this.load(name);
+            }
+            throw err;
+        }
     }
 
     delete(name) {
@@ -119,7 +144,7 @@ class BehaviourManager {
     }
 
     check() {
-        const results = { added: [], reloaded: [], removed: [] };
+        const results = { added: [], reloaded: [], removed: [], errors: [] };
 
         for (const [name, entry] of [...this.registry]) {
             const filePath = path.join(this.dir, `${name}.js`);
@@ -130,8 +155,12 @@ class BehaviourManager {
             }
             const source = fs.readFileSync(filePath, 'utf8');
             if (this._md5(source) !== entry.md5) {
-                this.load(name);
-                results.reloaded.push(name);
+                try {
+                    this.load(name);
+                    results.reloaded.push(name);
+                } catch (err) {
+                    results.errors.push({ name, error: err.message });
+                }
             }
         }
 
@@ -139,8 +168,12 @@ class BehaviourManager {
             for (const file of fs.readdirSync(this.dir).filter(f => f.endsWith('.js'))) {
                 const name = path.basename(file, '.js');
                 if (!this.registry.has(name)) {
-                    this.load(name);
-                    results.added.push(name);
+                    try {
+                        this.load(name);
+                        results.added.push(name);
+                    } catch (err) {
+                        results.errors.push({ name, error: err.message });
+                    }
                 }
             }
         }
