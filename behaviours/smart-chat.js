@@ -1,4 +1,4 @@
-const agent = require('./agent');
+const agentRegistry = require('./agent');
 
 const ADMIN_NUMBERS = (process.env.WAPROXY_ADMIN || '').split(',').map(s => s.trim()).filter(Boolean);
 
@@ -10,7 +10,7 @@ module.exports = function(chat, web, cron) {
 
     const debug = process.env.WAPROXY_LOG === 'debug';
 
-    agent.setChat(chat);
+    agentRegistry.setChat(chat);
 
     const resolveNumber = async (msg) => {
         if (debug) {
@@ -51,11 +51,13 @@ module.exports = function(chat, web, cron) {
 
         if (debug) console.log(`[smart-chat] input — from: ${number}, body: "${msg.body}"`);
 
+        const agent = agentRegistry.getFor(number);
+
         // Se c'è un'iterazione in attesa di un evento 'message', la priorità va a quella.
         if (agent.fireEvent('message', { from: number, text: msg.body })) return;
 
         try {
-            const reply = await agent.handleMessage(msg.body, number);
+            const reply = await agent.handleMessage(msg.body);
             if (debug) console.log(`[smart-chat] reply — "${reply}"`);
             await msg.reply(reply);
         } catch (err) {

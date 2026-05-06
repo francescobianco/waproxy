@@ -1,6 +1,8 @@
 # Agent Loop
 
-Un `Agent` è una singola istanza globale che pilota un loop interrompibile guidato da LLM. Gestisce task asincroni identificati da un **memo** e li esegue in iterazioni concorrenti.
+Esiste **un'istanza di `Agent` per ogni admin** — non un singleton globale. Ogni admin che interagisce con WAProxy ha il proprio agente dedicato, con goal, storia conversazione e iterazioni pendenti completamente separati. L'istanza viene creata al primo messaggio dell'admin e vive per tutta la durata del processo.
+
+La discovery dei modelli OpenRouter è invece condivisa tra tutte le istanze (una sola chiamata API).
 
 ---
 
@@ -246,16 +248,31 @@ behaviours/
   smart-chat.js   ← listener messaggi admin, risoluzione numero, prima iterazione
 ```
 
-### `agent.js` contiene
+### `agent.js` esporta
 
-- Classe `Agent`: `handleMessage(msg, number)`, `runIteration(memo, event?)`, `scheduleNext(memo)`, `scheduleTimeout(seconds, memo)`, `registerEvent(type, memo)`, `fireEvent(type, data)`, `kill(pattern)`
-- Tool MCP globali + self-referenziali (incluso `agent_event`)
-- Discovery e fallback modelli
-- Esportato come singleton: `module.exports = new Agent()`
+```js
+// Non un singleton, ma un registry
+module.exports = {
+    setChat(chat),          // chiama una volta in smart-chat
+    getFor(number),         // restituisce (e crea) l'Agent per quel numero
+};
+```
+
+Ogni istanza `Agent` ha:
+- `handleMessage(userMessage)` — one-shot dal listener WhatsApp
+- `runIteration(memo, event?)` — iterazione autonoma (timer o evento)
+- `scheduleNext(memo)`, `scheduleTimeout(seconds, memo)` — scheduling
+- `registerEvent(type, memo)`, `fireEvent(type, data)` — gestione eventi
+- `kill(pattern)` — cancella pending per pattern
+- `addGoal(description)` — aggiunge al goal cumulativo
+- Stato privato: `_number`, `_goal`, `_history`, `_pending`, `_pendingEvents`
+
+La discovery dei modelli (`_candidates`, `_candidateIdx`) è condivisa a livello di modulo.
 
 ### `smart-chat.js` fa solo
 
 - Ascoltare `chat.on('message', ...)` per messaggi admin
 - Risolvere il numero (LID → numero reale)
+- Ottenere l'istanza per quel numero: `agentRegistry.getFor(number)`
 - Verificare se c'è un event listener attivo (`agent.fireEvent('message', ...)`) — se sì, il messaggio è consumato dall'iterazione
-- Altrimenti chiamare `agent.handleMessage(msg.body, number)`
+- Altrimenti chiamare `agent.handleMessage(msg.body)`
