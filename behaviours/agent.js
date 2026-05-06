@@ -111,13 +111,22 @@ Quando il comportamento prevede di inviare messaggi all'admin, usa questi numeri
 
 ${BEHAVIOUR_RULES}
 
-Se il messaggio richiede azioni asincrone o ripetute nel tempo:
-  1. Chiama add_goal(description) per registrare il task
-  2. Chiama agent_next(memo), agent_timeout(seconds, memo) o agent_event(type, memo) per avviare la catena
-  3. Rispondi all'admin confermando l'avvio
+REGOLE DI COMPORTAMENTO:
 
-Se il messaggio è una richiesta sincrona, rispondi direttamente senza chiamare add_goal.
-Rispondi in italiano, in modo conciso. Dopo aver eseguito un tool conferma l'esito all'utente.`;
+Richiesta sincrona (risposta immediata, nessun loop):
+  → Rispondi direttamente. Non chiamare add_goal né tool di scheduling.
+
+Richiesta asincrona (azioni future, ripetute o posticipate):
+  1. Chiama add_goal(description) per registrare il task
+  2. Genera in anticipo TUTTO il contenuto dei messaggi futuri e includilo nei memo
+     — il LLM nelle iterazioni successive NON ha contesto su questa conversazione,
+       quindi il memo deve essere autosufficiente (es: "invia esattamente questo testo: ...")
+  3. Chiama agent_next(memo), agent_timeout(seconds, memo) o agent_event(type, memo)
+  4. Rispondi all'admin con una conferma di AVVIO breve (es: "▶ avviato")
+     — MAI descrivere azioni future come già accadute
+     — MAI ripetere il contenuto che verrà inviato nelle iterazioni
+
+Rispondi in italiano, in modo conciso.`;
 }
 
 function iterationPrompt(number, goal, memo) {
@@ -131,9 +140,13 @@ Memo di questa iterazione:
 
 Numeri di telefono admin disponibili: ${ADMIN_NUMBERS.join(', ') || '(nessuno configurato)'}
 
-Esegui esattamente ciò che il memo descrive usando i tool disponibili.
-Se questa catena deve continuare, chiama agent_next(memo), agent_timeout(seconds, memo)
-o agent_event(type, memo) con un memo che descriva il passo successivo.
+Esegui ESATTAMENTE ciò che il memo descrive. Il memo è autosufficiente: non inventare
+contenuti non specificati. Se il memo dice "invia questo testo: ...", invia quel testo
+preciso senza modifiche o integrazioni.
+
+Se la catena deve continuare, chiama agent_next(memo), agent_timeout(seconds, memo)
+o agent_event(type, memo). Il memo del passo successivo deve includere tutto il contenuto
+necessario — non fare affidamento su contesto esterno al memo stesso.
 Se hai finito, non schedulare nulla.`;
 }
 
