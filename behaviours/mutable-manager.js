@@ -21,6 +21,25 @@ class BehaviourManager {
         return crypto.createHash('md5').update(content).digest('hex');
     }
 
+    _filePath(name) {
+        return path.join(this.dir, `${name}.js`);
+    }
+
+    _invalidPath(name) {
+        return path.join(this.dir, `${name}.js.invalid`);
+    }
+
+    _quarantine(name, err) {
+        const filePath = this._filePath(name);
+        if (!fs.existsSync(filePath)) return null;
+
+        const invalidPath = this._invalidPath(name);
+        if (fs.existsSync(invalidPath)) fs.unlinkSync(invalidPath);
+        fs.renameSync(filePath, invalidPath);
+        console.error(`[mutable:${name}] behaviour disabilitato: ${err.message}`);
+        return invalidPath;
+    }
+
     _getRouter(name) {
         if (!this.routers.has(name)) {
             const router = express.Router();
@@ -58,7 +77,7 @@ class BehaviourManager {
     }
 
     _execute(name, entry) {
-        const filePath = path.join(this.dir, `${name}.js`);
+        const filePath = this._filePath(name);
         const modulePath = require.resolve(filePath);
         delete require.cache[modulePath];
         const fn = require(filePath);
@@ -82,7 +101,7 @@ class BehaviourManager {
     }
 
     load(name) {
-        const filePath = path.join(this.dir, `${name}.js`);
+        const filePath = this._filePath(name);
         const source = fs.readFileSync(filePath, 'utf8');
         const md5 = this._md5(source);
 
@@ -111,8 +130,10 @@ class BehaviourManager {
 
     save(name, source) {
         if (!fs.existsSync(this.dir)) fs.mkdirSync(this.dir, { recursive: true });
-        const filePath = path.join(this.dir, `${name}.js`);
+        const filePath = this._filePath(name);
         const previous = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : null;
+        const invalidPath = this._invalidPath(name);
+        if (fs.existsSync(invalidPath)) fs.unlinkSync(invalidPath);
 
         fs.writeFileSync(filePath, source, 'utf8');
         try {
@@ -130,12 +151,14 @@ class BehaviourManager {
 
     delete(name) {
         this.unload(name);
-        const filePath = path.join(this.dir, `${name}.js`);
+        const filePath = this._filePath(name);
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        const invalidPath = this._invalidPath(name);
+        if (fs.existsSync(invalidPath)) fs.unlinkSync(invalidPath);
     }
 
     show(name) {
-        const filePath = path.join(this.dir, `${name}.js`);
+        const filePath = this._filePath(name);
         return fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : null;
     }
 
@@ -147,7 +170,7 @@ class BehaviourManager {
         const results = { added: [], reloaded: [], removed: [], errors: [] };
 
         for (const [name, entry] of [...this.registry]) {
-            const filePath = path.join(this.dir, `${name}.js`);
+            const filePath = this._filePath(name);
             if (!fs.existsSync(filePath)) {
                 this.unload(name);
                 results.removed.push(name);
@@ -160,6 +183,7 @@ class BehaviourManager {
                     results.reloaded.push(name);
                 } catch (err) {
                     results.errors.push({ name, error: err.message });
+                    this._quarantine(name, err);
                 }
             }
         }
@@ -173,6 +197,7 @@ class BehaviourManager {
                         results.added.push(name);
                     } catch (err) {
                         results.errors.push({ name, error: err.message });
+                        this._quarantine(name, err);
                     }
                 }
             }

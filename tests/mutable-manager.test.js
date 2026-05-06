@@ -185,6 +185,21 @@ describe('BehaviourManager', () => {
         assert.equal(result.errors.length, 1);
         assert.equal(result.errors[0].name, 'invalid');
         assert.equal(chat.listenerCount('message'), 1);
+        assert.equal(fs.existsSync(path.join(dir, 'invalid.js')), false);
+        assert.equal(fs.existsSync(path.join(dir, 'invalid.js.invalid')), true);
+    });
+
+    test('check() mette in quarantena anche sorgenti con errori top-level', () => {
+        const dir = makeDir(base);
+        const manager = new BehaviourManager(makeChat(), makeWeb(), makeCron(), { dir });
+
+        write(dir, 'top-level-error', `chat.sendMessage('x', 'y');`);
+        const result = manager.check();
+
+        assert.equal(result.errors.length, 1);
+        assert.match(result.errors[0].error, /chat is not defined/);
+        assert.equal(fs.existsSync(path.join(dir, 'top-level-error.js')), false);
+        assert.equal(fs.existsSync(path.join(dir, 'top-level-error.js.invalid')), true);
     });
 
     test('check() rileva MD5 cambiato e ricarica', () => {
