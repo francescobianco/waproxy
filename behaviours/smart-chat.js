@@ -187,39 +187,48 @@ async function executeTool(name, args, chat) {
 
 // --- model discovery ---
 
-let _resolvedModel = process.env.OPENROUTER_MODEL || null;
+let _candidates = null; // lista ordinata di modelli free, null = non ancora caricata
+let _candidateIdx = 0;  // puntatore al modello corrente
 
-async function discoverBestFreeModel(apiKey) {
+async function loadCandidates(apiKey) {
+    if (_candidates !== null) return;
+
+    console.log('[smart-chat] discovery modelli free su OpenRouter...');
     const res = await fetch('https://openrouter.ai/api/v1/models', {
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+        headers: { 'Authorization': `Bearer ${apiKey}` }
     });
     if (!res.ok) throw new Error(`OpenRouter models API: ${res.status}`);
     const { data } = await res.json();
 
     const free = data.filter(m =>
-        m.pricing?.prompt === '0' &&
-        m.pricing?.completion === '0'
+        m.pricing?.prompt === '0' && m.pricing?.completion === '0'
     );
-
     if (!free.length) throw new Error('Nessun modello gratuito disponibile su OpenRouter');
 
-    // preferisce modelli con tool support, poi ordina per context window desc
     const withTools = free.filter(m => m.supported_parameters?.includes('tools'));
-    const candidates = withTools.length ? withTools : free;
-    candidates.sort((a, b) => (b.context_length || 0) - (a.context_length || 0));
+    const ranked = withTools.length ? withTools : free;
+    ranked.sort((a, b) => (b.context_length || 0) - (a.context_length || 0));
 
-    return candidates[0];
+    _candidates = ranked;
+    _candidateIdx = 0;
+    console.log(`[smart-chat] trovati ${ranked.length} modelli free con tool support`);
 }
 
-async function getModel(apiKey, debug) {
-    if (_resolvedModel) return _resolvedModel;
+function currentModel() {
+    if (process.env.OPENROUTER_MODEL) return process.env.OPENROUTER_MODEL;
+    if (!_candidates || _candidateIdx >= _candidates.length) return null;
+    return _candidates[_candidateIdx].id;
+}
 
-    console.log('[smart-chat] modello non configurato — avvio discovery modelli free su OpenRouter...');
-    const model = await discoverBestFreeModel(apiKey);
-    _resolvedModel = model.id;
-    console.log(`[smart-chat] modello selezionato: ${model.id} (ctx: ${model.context_length}, name: "${model.name}")`);
-    if (debug) console.log('[smart-chat] modello completo:', JSON.stringify(model, null, 2));
-    return _resolvedModel;
+function advanceModel() {
+    if (process.env.OPENROUTER_MODEL || !_candidates) return false;
+    _candidateIdx++;
+    if (_candidateIdx < _candidates.length) {
+        console.log(`[smart-chat] fallback al prossimo modello: ${_candidates[_candidateIdx].id}`);
+        return true;
+    }
+    console.warn('[smart-chat] nessun altro modello free disponibile');
+    return false;
 }
 
 // --- conversation context ---
@@ -244,51 +253,72 @@ function saveContext(number, userMessage, assistantReply) {
 
 async function runAgent(userMessage, chat, debug = false, number = null) {
     const apiKey = process.env.OPENROUTER_API_KEY;
-    const model = await getModel(apiKey, debug);
+
+    await loadCandidates(apiKey);
 
     const pastMessages = number ? loadContext(number) : [];
     if (debug && pastMessages.length) console.log(`[smart-chat] contesto caricato — ${pastMessages.length} messaggi precedenti da ${number}`);
 
-    const messages = [
-        { role: 'system', content: SYSTEM_PROMPT },
-        ...pastMessages,
-        { role: 'user', content: userMessage }
-    ];
+    // loop esterno: prova modelli diversi in caso di 429
+    while (true) {
+        const model = currentModel();
+        if (!model) throw new Error('Nessun modello free disponibile dopo i tentativi');
 
-    for (let turn = 0; turn < 10; turn++) {
-        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json',
-                'HTTP-Referer': 'https://github.com/francescobianco/waproxy'
-            },
-            body: JSON.stringify({ model, messages, tools: TOOLS })
-        });
+        if (debug) console.log(`[smart-chat] uso modello: ${model}`);
 
-        if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${await res.text()}`);
+        const messages = [
+            { role: 'system', content: SYSTEM_PROMPT },
+            ...pastMessages,
+            { role: 'user', content: userMessage }
+        ];
 
-        const data = await res.json();
-        const choice = data.choices[0];
-        const assistantMsg = choice.message;
-        messages.push(assistantMsg);
+        let rateLimited = false;
 
-        if (choice.finish_reason === 'stop' || !assistantMsg.tool_calls?.length) {
-            const reply = assistantMsg.content || '(nessuna risposta)';
-            if (number) saveContext(number, userMessage, reply);
-            return reply;
-        }
-
-        for (const toolCall of assistantMsg.tool_calls) {
-            const args = JSON.parse(toolCall.function.arguments);
-            const result = await executeTool(toolCall.function.name, args, chat);
-            if (debug) console.log(`[smart-chat] tool ${toolCall.function.name}`, JSON.stringify(args), '→', JSON.stringify(result));
-            messages.push({
-                role: 'tool',
-                tool_call_id: toolCall.id,
-                content: JSON.stringify(result)
+        // loop interno: turni agente (tool calls)
+        for (let turn = 0; turn < 10; turn++) {
+            const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                    'HTTP-Referer': 'https://github.com/francescobianco/waproxy'
+                },
+                body: JSON.stringify({ model, messages, tools: TOOLS })
             });
+
+            if (res.status === 429) {
+                console.warn(`[smart-chat] modello ${model} rate-limited (429), provo il prossimo...`);
+                rateLimited = !advanceModel();
+                break;
+            }
+
+            if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${await res.text()}`);
+
+            const data = await res.json();
+            const choice = data.choices[0];
+            const assistantMsg = choice.message;
+            messages.push(assistantMsg);
+
+            if (choice.finish_reason === 'stop' || !assistantMsg.tool_calls?.length) {
+                const reply = assistantMsg.content || '(nessuna risposta)';
+                if (number) saveContext(number, userMessage, reply);
+                return reply;
+            }
+
+            for (const toolCall of assistantMsg.tool_calls) {
+                const args = JSON.parse(toolCall.function.arguments);
+                const result = await executeTool(toolCall.function.name, args, chat);
+                if (debug) console.log(`[smart-chat] tool ${toolCall.function.name}`, JSON.stringify(args), '→', JSON.stringify(result));
+                messages.push({
+                    role: 'tool',
+                    tool_call_id: toolCall.id,
+                    content: JSON.stringify(result)
+                });
+            }
         }
+
+        if (rateLimited) throw new Error('Tutti i modelli free sono rate-limited. Riprova tra qualche minuto.');
+        if (!rateLimited) break; // uscita normale dal loop (limite turni)
     }
 
     const reply = 'Limite di turni agente raggiunto.';
