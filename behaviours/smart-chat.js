@@ -185,6 +185,45 @@ async function executeTool(name, args, chat) {
     }
 }
 
+// --- model discovery ---
+
+let _resolvedModel = process.env.OPENROUTER_MODEL || null;
+
+async function discoverBestFreeModel(apiKey) {
+    const res = await fetch('https://openrouter.ai/api/v1/models', {
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) throw new Error(`OpenRouter models API: ${res.status}`);
+    const { data } = await res.json();
+
+    const free = data.filter(m =>
+        m.pricing?.prompt === '0' &&
+        m.pricing?.completion === '0'
+    );
+
+    if (!free.length) throw new Error('Nessun modello gratuito disponibile su OpenRouter');
+
+    // preferisce modelli con tool support, poi ordina per context window desc
+    const withTools = free.filter(m => m.supported_parameters?.includes('tools'));
+    const candidates = withTools.length ? withTools : free;
+    candidates.sort((a, b) => (b.context_length || 0) - (a.context_length || 0));
+
+    return candidates[0];
+}
+
+async function getModel(apiKey, debug) {
+    if (_resolvedModel) return _resolvedModel;
+
+    console.log('[smart-chat] modello non configurato — avvio discovery modelli free su OpenRouter...');
+    const model = await discoverBestFreeModel(apiKey);
+    _resolvedModel = model.id;
+    console.log(`[smart-chat] modello selezionato: ${model.id} (ctx: ${model.context_length}, name: "${model.name}")`);
+    if (debug) console.log('[smart-chat] modello completo:', JSON.stringify(model, null, 2));
+    return _resolvedModel;
+}
+
+// --- conversation context ---
+
 const CONTEXT_TTL = parseInt(process.env.WAPROXY_CONTEXT_TTL || String(4 * 60 * 60 * 1000), 10);
 const contextHistory = new Map(); // number → [{ role, content, ts }]
 
@@ -205,7 +244,7 @@ function saveContext(number, userMessage, assistantReply) {
 
 async function runAgent(userMessage, chat, debug = false, number = null) {
     const apiKey = process.env.OPENROUTER_API_KEY;
-    const model = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
+    const model = await getModel(apiKey, debug);
 
     const pastMessages = number ? loadContext(number) : [];
     if (debug && pastMessages.length) console.log(`[smart-chat] contesto caricato — ${pastMessages.length} messaggi precedenti da ${number}`);
